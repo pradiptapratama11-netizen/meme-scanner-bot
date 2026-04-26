@@ -35,7 +35,12 @@ def fetch_pairs():
       "meme",
       "pepe",
       "dog",
-      "solana"
+      "cat",
+      "frog",
+      "ai",
+      "moon",
+      "solana",
+      "inu"
     ]
 
     all_pairs=[]
@@ -55,7 +60,7 @@ def fetch_pairs():
             all_pairs += data.get(
                 "pairs",
                 []
-            )[:50]
+            )[:300]
 
         except:
             pass
