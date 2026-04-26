@@ -9,73 +9,59 @@ def send(msg):
     url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     requests.post(
-      url,
-      json={
-        "chat_id":CHAT_ID,
-        "text":msg
-      },
-      timeout=20
+        url,
+        json={
+            "chat_id":CHAT_ID,
+            "text":msg
+        },
+        timeout=20
     )
 
 
 def fetch_pairs():
+    # cari meme related pairs instead of generic solana
+    queries=[
+      "meme",
+      "doge",
+      "pepe",
+      "solana"
+    ]
 
-    url="https://api.dexscreener.com/latest/dex/search?q=solana"
+    pairs=[]
 
-    r=requests.get(
-      url,
-      timeout=20
-    )
+    for q in queries:
 
-    data=r.json()
+        try:
+            url=f"https://api.dexscreener.com/latest/dex/search?q={q}"
 
-    return data.get("pairs",[])[:100]
+            r=requests.get(
+               url,
+               timeout=20
+            )
 
+            data=r.json()
 
-def valid(p):
+            pairs += data.get(
+               "pairs",
+               []
+            )[:40]
 
-    try:
+        except:
+            pass
 
-        mc=float(p.get("fdv") or 0)
-
-        liq=float(
-         (p.get("liquidity") or {}).get("usd") or 0
-        )
-
-        vol=float(
-         (p.get("volume") or {}).get("h24") or 0
-        )
-
-        # LONGGARIN FILTER
-        if mc<10000 or mc>250000:
-            return False
-
-        if liq<3000:
-            return False
-
-        if vol<3000:
-            return False
-
-        return True
-
-    except:
-        return False
+    return pairs
 
 
 def score(p):
 
     try:
 
-        mc=float(
-         p.get("fdv") or 1
+        liq=float(
+         (p.get("liquidity") or {}).get("usd") or 0
         )
 
         vol=float(
          (p.get("volume") or {}).get("h24") or 0
-        )
-
-        liq=float(
-         (p.get("liquidity") or {}).get("usd") or 0
         )
 
         tx=(p.get("txns") or {}).get(
@@ -86,11 +72,11 @@ def score(p):
          tx.get("buys") or 0
         )
 
+        # much simpler alpha score
         s=(
-          min(vol/5000,30)+
-          min(liq/5000,30)+
-          min(buys/10,20)+
-          (20 if mc<60000 else 10)
+         min(liq/1000,30)+
+         min(vol/1000,40)+
+         min(buys/5,30)
         )
 
         return round(s,2)
@@ -103,93 +89,64 @@ def run_scanner():
 
     pairs=fetch_pairs()
 
-    picks=[]
-    watchlist=[]
+    ranked=[]
+
+    seen=set()
 
     for p in pairs:
 
-        if valid(p):
+        try:
+
+            symbol=p.get(
+              "baseToken",{}
+            ).get(
+              "symbol","?"
+            )
+
+            if symbol in seen:
+                continue
+
+            seen.add(symbol)
 
             s=score(p)
 
-            token={
-              "symbol":
-               p.get(
-                "baseToken",{}
-               ).get(
-                "symbol","?"
-               ),
+            if s>15:   # jauh dilonggarkan
+                ranked.append({
+                  "symbol":symbol,
+                  "score":s
+                })
 
-              "score":s,
-
-              "mc":
-                int(
-                 float(
-                  p.get("fdv") or 0
-                 )
-                )
-            }
-
-            if s>60:
-                picks.append(token)
-
-            elif s>35:
-                watchlist.append(token)
+        except:
+            pass
 
 
-    picks=sorted(
-      picks,
+    ranked=sorted(
+      ranked,
       key=lambda x:x["score"],
       reverse=True
-    )[:3]
+    )[:5]
 
 
-    watchlist=sorted(
-      watchlist,
-      key=lambda x:x["score"],
-      reverse=True
-    )[:3]
+    if not ranked:
+        send("No setups today.")
+        return
 
 
-    msg="🚀 MEME SCANNER REPORT\n\n"
+    msg="🚀 TOP MEME MOMENTUM PICKS\n\n"
 
+    for i,p in enumerate(
+      ranked,
+      1
+    ):
+        msg+=(
+         f"{i}. "
+         f"{p['symbol']} "
+         f"| Score {p['score']}\n"
+        )
 
-    if picks:
-
-        msg+="A+ PICKS\n"
-
-        for i,p in enumerate(
-         picks,
-         1
-        ):
-            msg+=(
-             f"{i}. "
-             f"{p['symbol']} "
-             f"(Score {p['score']}) "
-             f"MC ${p['mc']}\n"
-            )
-
-    if watchlist:
-
-        msg+="\nWATCHLIST\n"
-
-        for i,p in enumerate(
-          watchlist,
-          1
-        ):
-            msg+=(
-             f"{i}. "
-             f"{p['symbol']} "
-             f"(Score {p['score']})\n"
-            )
-
-
-    if not picks and not watchlist:
-        msg="No setups today."
-
-
-    msg += (
-      "\n\nRule:\n"
+    msg+=(
+      "\nPotential Zone:\n"
+      "2x-10x momentum watchlist\n\n"
       "SL -20%\n"
       "Profit Lock +30%"
     )
