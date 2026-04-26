@@ -20,7 +20,6 @@ BAD={
 "DOGE","CAT","TOKEN"
 }
 
-
 ########################
 # FETCH
 ########################
@@ -30,29 +29,27 @@ def fetch():
     queries=[
       "pump",
       "pump fun",
-      "new solana meme",
-      "microcap solana"
+      "microcap solana",
+      "new solana meme"
     ]
 
     pairs=[]
 
     for q in queries:
-
       try:
         r=requests.get(
          f"https://api.dexscreener.com/latest/dex/search?q={q}",
          timeout=20
         )
 
-        pairs+=r.json().get(
-         "pairs",[]
-        )[:60]
+        pairs += r.json().get(
+          "pairs",[]
+        )[:70]
 
       except:
         pass
 
     return pairs
-
 
 
 ########################
@@ -76,30 +73,30 @@ def fresh(p):
 
 
 def clean(sym):
-   return bool(
-    re.match(
-      r'^[A-Za-z0-9]+$',
-      sym
+    return bool(
+      re.match(
+        r'^[A-Za-z0-9]+$',
+        sym
+      )
     )
-   )
 
 
 def link(ca):
 
     if str(ca).startswith("0x"):
       return (
-      "https://dexscreener.com/bsc/"
-      +ca
+       "https://dexscreener.com/bsc/"
+       +ca
       )
 
     return (
-     "https://dexscreener.com/solana/"
-     +ca
+      "https://dexscreener.com/solana/"
+      +ca
     )
 
 
 ########################
-# SCORE
+# SCORE ENGINE
 ########################
 
 def score(p):
@@ -134,7 +131,6 @@ def score(p):
 
     ratio=buys/sells
 
-
     ch=(p.get("priceChange") or {})
 
     h1=float(
@@ -146,32 +142,30 @@ def score(p):
     )
 
 
-    #################
-    # anti rug
-    #################
+    ##################
+    # anti trap
+    ##################
 
-    if liq<5000:
+    if liq<7000:
        return 0
 
-    if mc>0 and liq/mc<0.12:
+    if mc>0 and liq/mc<0.15:
        return 0
 
 
     s=0
 
-
-    #################
+    ##################
     # graduation
-    #################
+    ##################
 
     if 25000<mc<70000:
-       s+=35
+       s+=30
 
-    elif 15000<mc<100000:
-       s+=20
+    elif mc<100000:
+       s+=15
 
-
-    if liq>8000:
+    if liq>10000:
        s+=20
 
     if vol>15000:
@@ -181,36 +175,47 @@ def score(p):
        s+=15
 
     if buys>100:
-       s+=15
+       s+=10
 
 
-    #################
+    ##################
     # pullback entry
-    #################
+    ##################
 
     if h24>50:
        s+=10
 
     if -35<h1<-8:
-       s+=20
+       s+=15
 
 
-    #################
+    ##################
     # SMART WALLET PROXY
-    #################
+    ##################
 
-    # whale clustering proxy
+    smart=0
+
+    # clustered buying
     if buys>150:
-       s+=15
+       smart+=20
 
-    # volume acceleration
+    # aggressive accumulation
+    if ratio>3:
+       smart+=20
+
+    # volume expansion vs mcap
     if vol>mc*0.5:
-       s+=15
+       smart+=20
 
-    # asymmetric microcaps
+    # high activity concentration
+    if buys+sells>250:
+       smart+=20
+
+    # microcap asymmetry bonus
     if mc<50000:
-       s+=10
+       smart+=10
 
+    s += smart
 
     return round(s,2)
 
@@ -218,20 +223,18 @@ def score(p):
     return 0
 
 
-
 def grade(s):
 
-   if s>=120:
-      return "👑 GOD MODE"
+   if s>=135:
+      return "👑 GOD MODE CONFIRMED"
 
-   if s>=100:
-      return "🎯 A+ Sniper"
+   if s>=115:
+      return "🎯 A+ Smart Wallet"
 
-   if s>=85:
+   if s>=95:
       return "🔥 A Setup"
 
    return "Watch"
-
 
 
 ########################
@@ -245,52 +248,48 @@ def run():
 
  for p in fetch():
 
-   try:
+  try:
 
-    if not fresh(p):
-       continue
+   if not fresh(p):
+      continue
 
+   sym=p.get(
+    "baseToken",{}
+   ).get(
+    "symbol","?"
+   ).upper()
 
-    sym=p.get(
-      "baseToken",{}
-    ).get(
-      "symbol","?"
-    ).upper()
+   if sym in BAD:
+      continue
 
+   if not clean(sym):
+      continue
 
-    if sym in BAD:
-       continue
+   if sym in seen:
+      continue
 
-    if not clean(sym):
-       continue
-
-    if sym in seen:
-       continue
-
-    seen.add(sym)
+   seen.add(sym)
 
 
-    s=score(p)
+   s=score(p)
 
-    if s<85:
-       continue
+   if s<95:
+      continue
 
+   ca=p.get(
+     "baseToken",{}
+   ).get(
+     "address",""
+   )
 
-    ca=p.get(
-      "baseToken",{}
-    ).get(
-      "address",""
-    )
+   picks.append({
+    "sym":sym,
+    "score":s,
+    "grade":grade(s),
+    "ca":ca
+   })
 
-    picks.append({
-      "sym":sym,
-      "score":s,
-      "grade":grade(s),
-      "ca":ca
-    })
-
-
-   except:
+  except:
     pass
 
 
@@ -302,16 +301,13 @@ def run():
 
 
  if not picks:
-
    send(
-   "No A+ asymmetry setups today."
+    "No smart-wallet confirmed setups today."
    )
    return
 
 
-
- msg="🚀 GOD MODE MEME AGENT\n\n"
-
+ msg="🚀 SMART WALLET GOD MODE\n\n"
 
  for p in picks:
 
@@ -324,21 +320,19 @@ def run():
 
 
  msg+=(
- "Execution:\n"
- "25% starter\n"
- "25% reclaim add\n"
- "leave runner\n\n"
+ "Sizing:\n"
+ "A Setup = 0.5R\n"
+ "A+ Smart Wallet = 0.75R\n"
+ "God Mode Confirmed = 1R\n\n"
 
  "Risk:\n"
  "-20% SL\n"
- "+30% stop to breakeven\n"
- "2x pull principal\n"
- "hold moonbag for 10x-100x"
+ "+30% move stop above entry\n"
+ "2x take principal\n"
+ "let moonbag hunt 10x-100x"
  )
 
-
  send(msg)
-
 
 
 if __name__=="__main__":
