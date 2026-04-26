@@ -46,7 +46,7 @@ def fetch_pairs():
         )
         pairs+=r.json().get(
           "pairs",[]
-        )[:100]
+        )[:300]
 
       except:
         pass
