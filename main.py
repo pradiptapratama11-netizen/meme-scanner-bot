@@ -9,16 +9,12 @@ def send(msg):
     requests.post(
       f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
       json={
-        "chat_id":CHAT_ID,
-        "text":msg
+       "chat_id":CHAT_ID,
+       "text":msg
       },
       timeout=20
     )
 
-
-##################################
-# SEARCH FRESH PUMP COINS
-##################################
 
 def fetch():
 
@@ -29,14 +25,10 @@ def fetch():
 
     return r.json().get(
       "pairs",[]
-    )[:150]
+    )[:200]
 
 
-##################################
-# NEAR GRADUATION SCORE
-##################################
-
-def score(p):
+def metrics(p):
 
     try:
 
@@ -55,7 +47,7 @@ def score(p):
       )
 
       tx=(p.get("txns") or {}).get(
-        "h24",{}
+       "h24",{}
       )
 
       buys=float(
@@ -68,34 +60,73 @@ def score(p):
 
       ratio=buys/sells
 
-      s=0
-
-      # proxy near graduation zone
-      if 20000<mc<80000:
-          s+=35
-
-      if liq>8000:
-          s+=20
-
-      if vol>12000:
-          s+=20
-
-      if ratio>2:
-          s+=15
-
-      if buys>100:
-          s+=10
-
-      return s
+      return (
+        mc,liq,vol,
+        buys,sells,ratio
+      )
 
     except:
-      return 0
+      return(
+       0,0,0,
+       0,1,0
+      )
+
+
+def grad_score(p):
+
+    mc,liq,vol,buys,sells,ratio=metrics(p)
+
+    s=0
+
+    # graduation proxy zone
+    if 25000<mc<70000:
+        s+=35
+
+    elif 15000<mc<100000:
+        s+=20
+
+
+    if liq>8000:
+        s+=20
+
+    if vol>10000:
+        s+=15
+
+    if vol>20000:
+        s+=10
+
+    if ratio>2:
+        s+=15
+
+    if buys>100:
+        s+=10
+
+    ca=p.get(
+      "baseToken",{}
+    ).get(
+      "address",""
+    ).lower()
+
+    if "pump" in ca:
+        s+=10
+
+    return round(s,2)
+
+
+def conviction(s):
+
+    if s>=80:
+       return "🔥 Imminent"
+
+    if s>=65:
+       return "🚀 Near"
+
+    return "Watch"
 
 
 def run():
 
     picks=[]
-
     seen=set()
 
     for p in fetch():
@@ -109,28 +140,25 @@ def run():
         ).upper()
 
         if sym in seen:
-            continue
+           continue
 
         seen.add(sym)
 
-        ca=p.get(
-         "baseToken",{}
-        ).get(
-         "address",""
-        )
+        s=grad_score(p)
 
-        # focus pump-like only
-        if "pump" not in ca.lower():
-            continue
+        if s>=50:
 
-        s=score(p)
-
-        if s>=60:
+          ca=p.get(
+           "baseToken",{}
+          ).get(
+           "address",""
+          )
 
           picks.append({
-            "sym":sym,
-            "ca":ca,
-            "score":s
+             "sym":sym,
+             "ca":ca,
+             "score":s,
+             "conv":conviction(s)
           })
 
       except:
@@ -145,34 +173,31 @@ def run():
 
 
     if not picks:
-
-      send(
-       "No near-migration candidates."
-      )
-
-      return
+       send(
+       "No graduation candidates today."
+       )
+       return
 
 
-    msg="🚀 PUMP MIGRATION SNIPER\n\n"
+    msg="🚀 PUMP FUN GRADUATION SNIPER\n\n"
 
     for p in picks:
 
       msg+=(
        f"{p['sym']}\n"
-       f"Near Graduation Score {p['score']}\n"
+       f"{p['conv']}\n"
+       f"Graduation Score {p['score']}\n"
        f"https://dexscreener.com/solana/{p['ca']}\n\n"
       )
 
 
     msg+=(
       "Focus:\n"
-      "Pre migration candidates\n"
-      "Potential Pump→DEX moves"
+      "Pre-DEX migration candidates\n"
+      "Pump→Raydium style setups"
     )
 
-
     send(msg)
-
 
 
 if __name__=="__main__":
