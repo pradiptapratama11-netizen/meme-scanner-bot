@@ -1,11 +1,11 @@
-import os,requests
+import os
+import requests
 
-BOT_TOKEN=os.getenv("BOT_TOKEN")
-CHAT_ID=os.getenv("CHAT_ID")
+BOT_TOKEN=os.getenv('BOT_TOKEN')
+CHAT_ID=os.getenv('CHAT_ID')
 
 
 def send(msg):
-
     requests.post(
       f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
       json={
@@ -16,189 +16,62 @@ def send(msg):
     )
 
 
-def fetch():
+##########################
+# Pump.fun source
+##########################
+# NOTE:
+# endpoint bisa berubah; kalau berubah kita adjust.
+# ini contoh memakai coins feed.
 
-    r=requests.get(
-      "https://api.dexscreener.com/latest/dex/search?q=pump",
-      timeout=20
-    )
+def fetch_candidates():
 
-    return r.json().get(
-      "pairs",[]
-    )[:200]
+    urls=[
+      "https://frontend-api.pump.fun/coins/latest",
+      "https://frontend-api.pump.fun/coins/king-of-the-hill"
+    ]
 
+    out=[]
 
-def metrics(p):
-
-    try:
-
-      mc=float(
-       p.get("fdv") or 0
-      )
-
-      liq=float(
-       (p.get("liquidity") or {}
-       ).get("usd") or 0
-      )
-
-      vol=float(
-       (p.get("volume") or {}
-       ).get("h24") or 0
-      )
-
-      tx=(p.get("txns") or {}).get(
-       "h24",{}
-      )
-
-      buys=float(
-       tx.get("buys") or 0
-      )
-
-      sells=float(
-       tx.get("sells") or 1
-      )
-
-      ratio=buys/sells
-
-      return (
-        mc,liq,vol,
-        buys,sells,ratio
-      )
-
-    except:
-      return(
-       0,0,0,
-       0,1,0
-      )
-
-
-def grad_score(p):
-
-    mc,liq,vol,buys,sells,ratio=metrics(p)
-
-    s=0
-
-    # graduation proxy zone
-    if 25000<mc<70000:
-        s+=35
-
-    elif 15000<mc<100000:
-        s+=20
-
-
-    if liq>8000:
-        s+=20
-
-    if vol>10000:
-        s+=15
-
-    if vol>20000:
-        s+=10
-
-    if ratio>2:
-        s+=15
-
-    if buys>100:
-        s+=10
-
-    ca=p.get(
-      "baseToken",{}
-    ).get(
-      "address",""
-    ).lower()
-
-    if "pump" in ca:
-        s+=10
-
-    return round(s,2)
-
-
-def conviction(s):
-
-    if s>=80:
-       return "🔥 Imminent"
-
-    if s>=65:
-       return "🚀 Near"
-
-    return "Watch"
-
-
-def run():
-
-    picks=[]
-    seen=set()
-
-    for p in fetch():
-
+    for u in urls:
       try:
+         r=requests.get(
+           u,
+           timeout=20
+         )
 
-        sym=p.get(
-         "baseToken",{}
-        ).get(
-         "symbol","?"
-        ).upper()
+         data=r.json()
 
-        if sym in seen:
-           continue
-
-        seen.add(sym)
-
-        s=grad_score(p)
-
-        if s>=50:
-
-          ca=p.get(
-           "baseToken",{}
-          ).get(
-           "address",""
-          )
-
-          picks.append({
-             "sym":sym,
-             "ca":ca,
-             "score":s,
-             "conv":conviction(s)
-          })
+         if isinstance(data,list):
+            out+=data[:100]
 
       except:
          pass
 
-
-    picks=sorted(
-      picks,
-      key=lambda x:x["score"],
-      reverse=True
-    )[:5]
+    return out
 
 
-    if not picks:
-       send(
-       "No graduation candidates today."
-       )
-       return
+##########################
+# Graduation Score
+##########################
 
+def grad_score(c):
 
-    msg="🚀 PUMP FUN GRADUATION SNIPER\n\n"
+    try:
+        # nama field bisa berubah antar endpoint,
+        # kita handle fallback.
 
-    for p in picks:
+        bonding=float(
+          c.get('bonding_curve_progress')
+          or c.get('bondingProgress')
+          or 0
+        )
 
-      msg+=(
-       f"{p['sym']}\n"
-       f"{p['conv']}\n"
-       f"Graduation Score {p['score']}\n"
-       f"https://dexscreener.com/solana/{p['ca']}\n\n"
-      )
+        buys=float(
+          c.get('buys_24h')
+          or c.get('buys')
+          or 0
+        )
 
-
-    msg+=(
-      "Focus:\n"
-      "Pre-DEX migration candidates\n"
-      "Pump→Raydium style setups"
-    )
-
-    send(msg)
-
-
-if __name__=="__main__":
-   run()
+        volume=float(
+          c.get('volume_24h')
+    run()
