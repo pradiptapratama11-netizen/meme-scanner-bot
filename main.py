@@ -8,8 +8,8 @@ def send(msg):
     requests.post(
       f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
       json={
-       "chat_id":CHAT_ID,
-       "text":msg
+        "chat_id":CHAT_ID,
+        "text":msg
       },
       timeout=20
     )
@@ -21,9 +21,9 @@ BAD={
 }
 
 
-################################
+########################
 # FETCH
-################################
+########################
 
 def fetch_pairs():
 
@@ -32,8 +32,8 @@ def fetch_pairs():
       "pepe",
       "frog",
       "inu",
-      "solana meme",
-      "bsc meme"
+      "bsc meme",
+      "solana meme"
     ]
 
     pairs=[]
@@ -47,7 +47,7 @@ def fetch_pairs():
 
         pairs+=r.json().get(
          "pairs",[]
-        )[:500]
+        )[:100]
 
       except:
         pass
@@ -55,13 +55,16 @@ def fetch_pairs():
     return pairs
 
 
-################################
+########################
 # HELPERS
-################################
+########################
 
 def fresh(p):
+
     try:
-      c=p.get("pairCreatedAt")
+      c=p.get(
+       "pairCreatedAt"
+      )
 
       if not c:
          return True
@@ -76,8 +79,7 @@ def fresh(p):
       return True
 
 
-def clean_symbol(sym):
-
+def clean(sym):
     return bool(
       re.match(
        r'^[A-Za-z0-9]+$',
@@ -87,12 +89,10 @@ def clean_symbol(sym):
 
 
 def chain(ca):
-
     if str(ca).startswith(
       "0x"
     ):
-      return "bsc"
-
+       return "bsc"
     return "solana"
 
 
@@ -100,19 +100,19 @@ def link(ca):
 
     if chain(ca)=="bsc":
       return (
-      "https://dexscreener.com/bsc/"
-      +ca
+       "https://dexscreener.com/bsc/"
+       +ca
       )
 
     return (
-     "https://dexscreener.com/solana/"
-     +ca
+      "https://dexscreener.com/solana/"
+      +ca
     )
 
 
-################################
+########################
 # METRICS
-################################
+########################
 
 def metrics(p):
 
@@ -133,7 +133,7 @@ def metrics(p):
       )
 
       tx=(p.get("txns") or {}).get(
-        "h24",{}
+       "h24",{}
       )
 
       buys=float(
@@ -146,113 +146,92 @@ def metrics(p):
 
       ratio=buys/sells
 
-      return (
-       mc,liq,vol,buys,sells,ratio
+      return(
+       mc,liq,vol,
+       buys,sells,ratio
       )
 
     except:
-      return (0,0,0,0,1,0)
+      return(
+       0,0,0,
+       0,1,0
+      )
 
 
-################################
-# RUG RISK FILTER
-################################
+########################
+# RISK SCORE
+########################
 
-def rug_risk(p):
+def risk(p):
 
     mc,liq,vol,buys,sells,ratio=metrics(p)
 
-    risk=0
+    r=0
 
-
-    # thin liquidity danger
     if mc>0:
 
-      liq_ratio=liq/mc
+      lr=liq/mc
 
-      if liq_ratio<0.08:
-         risk+=40
+      if lr<0.06:
+          r+=30
 
-      elif liq_ratio<0.12:
-         risk+=20
-
-
-    # fake volume proxy
-    if buys>0:
-
-      if vol > buys*1500:
-          risk+=30
+      elif lr<0.10:
+          r+=15
 
 
-    # dead tx flow
-    if buys+sells <40:
-       risk+=20
+    if buys+sells<20:
+        r+=15
 
 
-    if ratio<1.2:
-       risk+=20
+    if ratio<1.3:
+        r+=15
 
 
-    return risk
+    if buys>0 and vol>buys*2000:
+        r+=20
+
+    return r
 
 
-################################
+########################
 # ALPHA SCORE
-################################
+########################
 
-def alpha_score(p):
+def alpha(p):
 
     mc,liq,vol,buys,sells,ratio=metrics(p)
 
     s=0
 
-    if 10000<mc<50000:
-       s+=35
+    if 10000<mc<60000:
+       s+=30
+    elif mc<120000:
+       s+=15
 
-    elif mc<100000:
+    if liq>5000:
        s+=20
 
-    if liq>7000:
+    if vol>10000:
        s+=20
 
-    if vol>15000:
+    if ratio>2:
        s+=20
 
-    if ratio>3:
-       s+=20
-
-    if buys>120:
+    if buys>70:
        s+=10
 
     return s
 
 
-def conviction(s):
-
-    if s>=80:
-       return "A+"
-
-    return "A"
-
-
-def risk_label(r):
-
-    if r<=10:
-      return "LOW"
-
-    if r<=30:
-      return "MED"
-
-    return "HIGH"
-
-
-################################
+########################
 # MAIN
-################################
+########################
 
 def run():
 
-    picks=[]
+    elite=[]
+    spec=[]
+
     seen=set()
 
     for p in fetch_pairs():
@@ -260,7 +239,7 @@ def run():
       try:
 
         if not fresh(p):
-            continue
+           continue
 
         sym=p.get(
          "baseToken",{}
@@ -269,84 +248,102 @@ def run():
         ).upper()
 
         if sym in BAD:
-            continue
+           continue
 
-        if not clean_symbol(sym):
-            continue
+        if not clean(sym):
+           continue
 
         if sym in seen:
-            continue
+           continue
 
         seen.add(sym)
 
+        r=risk(p)
 
-        r=rug_risk(p)
-
-        # reject garbage
-        if r>30:
-            continue
+        if r>50:
+           continue
 
 
-        s=alpha_score(p)
+        s=alpha(p)
 
-        # elite only
-        if s<70:
-            continue
-
-
-        ca=p.get(
-         "baseToken",{}
-        ).get(
-         "address",""
-        )
+        if s<60:
+           continue
 
 
-        picks.append({
+        item={
+          "sym":sym,
+          "ca":p.get(
+             "baseToken",{}
+           ).get(
+             "address",""
+           ),
+          "score":s,
+          "risk":r
+        }
 
-         "sym":sym,
-         "ca":ca,
-         "score":s,
-         "risk":r
+        if r<=25:
+            elite.append(item)
 
-        })
+        else:
+            spec.append(item)
 
       except:
         pass
 
 
-    picks=sorted(
-      picks,
+    elite=sorted(
+      elite,
       key=lambda x:x["score"],
       reverse=True
-    )[:5]
+    )[:3]
+
+    spec=sorted(
+      spec,
+      key=lambda x:x["score"],
+      reverse=True
+    )[:3]
 
 
-    if not picks:
+    if not elite and not spec:
       send(
-       "No elite low-rug setups today."
+       "No balanced setups today."
       )
       return
 
 
-    msg="🚀 ALPHA HUNTER V4\n\n"
+    msg="🚀 BALANCED HUNTER V4.5\n\n"
 
-    for p in picks:
 
-      msg+=(
-       f"{p['sym']}\n"
-       f"Conviction {conviction(p['score'])}\n"
-       f"Rug Risk {risk_label(p['risk'])}\n"
-       f"{link(p['ca'])}\n\n"
-      )
+    if elite:
+      msg+="ELITE PICKS\n"
+
+      for p in elite:
+
+        msg+=(
+         f"{p['sym']}\n"
+         f"Risk LOW\n"
+         f"{link(p['ca'])}\n\n"
+        )
+
+
+    if spec:
+      msg+="SPECULATIVE\n"
+
+      for p in spec:
+
+        msg+=(
+         f"{p['sym']}\n"
+         f"Risk MED\n"
+         f"{link(p['ca'])}\n\n"
+        )
 
 
     msg+=(
-      "Filters:\n"
-      "Low rug risk only\n"
-      "Fresh <24h\n\n"
-      "Risk:\n"
-      "-20% stop\n"
-      "+30% profit lock"
+     "Focus:\n"
+     "Fresh <24h\n"
+     "3x-100x asymmetry\n\n"
+     "SL -20%\n"
+     "Profit lock +30%"
     )
 
     send(msg)
@@ -354,4 +351,4 @@ def run():
 
 
 if __name__=="__main__":
-    run()
+   run()
