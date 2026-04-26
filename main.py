@@ -6,44 +6,40 @@ BOT_TOKEN=os.getenv("BOT_TOKEN")
 CHAT_ID=os.getenv("CHAT_ID")
 
 
-############################
+################################
 # TELEGRAM
-############################
+################################
 
 def send(msg):
 
     url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     requests.post(
-        url,
-        json={
-          "chat_id":CHAT_ID,
-          "text":msg
-        },
-        timeout=20
+      url,
+      json={
+       "chat_id":CHAT_ID,
+       "text":msg
+      },
+      timeout=20
     )
 
 
-############################
-# MULTI SEARCH FOR FRESH MEMES
-############################
+################################
+# FETCH
+################################
 
 def fetch_pairs():
 
     searches=[
       "pump",
-      "meme",
       "pepe",
-      "dog",
-      "cat",
       "frog",
-      "ai",
       "moon",
-      "solana",
-      "inu"
+      "inu",
+      "solana meme"
     ]
 
-    all_pairs=[]
+    pairs=[]
 
     for q in searches:
 
@@ -51,28 +47,28 @@ def fetch_pairs():
             url=f"https://api.dexscreener.com/latest/dex/search?q={q}"
 
             r=requests.get(
-               url,
-               timeout=20
+              url,
+              timeout=20
             )
 
             data=r.json()
 
-            all_pairs += data.get(
-                "pairs",
-                []
-            )[:300]
+            pairs+=data.get(
+               "pairs",
+               []
+            )[:80]
 
         except:
             pass
 
-    return all_pairs
+    return pairs
 
 
-############################
-# AGE FILTER <24H
-############################
+################################
+# FRESH <24h
+################################
 
-def fresh_launch(p):
+def fresh(p):
 
     try:
 
@@ -83,26 +79,51 @@ def fresh_launch(p):
         if not created:
             return True
 
-        age_hours=(
-          time.time()*1000-created
+        age=(
+         time.time()*1000-created
         )/3600000
 
-        return age_hours <24
+        return age<24
 
     except:
         return True
 
 
-############################
-# 100X HUNTER SCORE
-############################
+################################
+# BLACKLIST NOISE
+################################
 
-def alpha_score(p):
+BAD={
+"AI","SOL","ETH","BTC",
+"DOGE","CAT","TOKEN",
+"TEST","USD"
+}
+
+
+################################
+# PUMP FILTER
+################################
+
+def looks_like_pump(ca):
+
+    ca=str(ca).lower()
+
+    return (
+      "pump" in ca
+      or len(ca)>30
+    )
+
+
+################################
+# ALPHA SCORE
+################################
+
+def score(p):
 
     try:
 
         mc=float(
-          p.get("fdv") or 0
+         p.get("fdv") or 0
         )
 
         liq=float(
@@ -118,8 +139,7 @@ def alpha_score(p):
         )
 
         tx=(p.get("txns") or {}).get(
-          "h24",
-          {}
+          "h24",{}
         )
 
         buys=float(
@@ -130,42 +150,43 @@ def alpha_score(p):
          tx.get("sells") or 1
         )
 
-        buy_ratio=buys/sells
+        ratio=buys/sells
 
-        score=0
 
-        # sweet spot small caps
-        if 15000<mc<60000:
-            score+=30
+        s=0
 
-        elif mc<120000:
-            score+=15
+
+        # microcaps sweet spot
+        if 10000<mc<50000:
+            s+=35
+
+        elif mc<100000:
+            s+=20
 
 
         if liq>5000:
-            score+=20
+            s+=20
 
         if vol>10000:
-            score+=20
+            s+=20
 
-        if buy_ratio>1.5:
-            score+=20
+        if ratio>2:
+            s+=20
 
-        if buys>50:
-            score+=10
+        if buys>100:
+            s+=10
 
-
-        return round(score,2)
+        return round(s,2)
 
     except:
         return 0
 
 
-############################
-# CONVICTION LABEL
-############################
+################################
+# LABEL
+################################
 
-def conviction(s):
+def label(s):
 
     if s>=75:
         return "🔥 Moonshot"
@@ -176,31 +197,43 @@ def conviction(s):
     return "Watch"
 
 
-############################
-# MAIN SCANNER
-############################
+################################
+# SCANNER
+################################
 
 def run_scanner():
 
     pairs=fetch_pairs()
 
-    picks=[]
-
     seen=set()
+
+    picks=[]
 
 
     for p in pairs:
 
         try:
 
-            if not fresh_launch(p):
+            if not fresh(p):
                 continue
 
+
             symbol=p.get(
-             "baseToken",{}
+              "baseToken",{}
             ).get(
-             "symbol","?"
-            )
+              "symbol","?"
+            ).upper()
+
+
+            if symbol in BAD:
+                continue
+
+
+            if symbol in seen:
+                continue
+
+            seen.add(symbol)
+
 
             ca=p.get(
              "baseToken",{}
@@ -208,20 +241,24 @@ def run_scanner():
              "address","N/A"
             )
 
-            if symbol in seen:
+
+            if not looks_like_pump(ca):
                 continue
 
-            seen.add(symbol)
 
-            score=alpha_score(p)
+            s=score(p)
 
-            if score>=45:
+
+            # tighter threshold
+            if s>=55:
 
                 picks.append({
+
                  "symbol":symbol,
                  "ca":ca,
-                 "score":score,
-                 "label":conviction(score)
+                 "score":s,
+                 "label":label(s)
+
                 })
 
         except:
@@ -237,12 +274,12 @@ def run_scanner():
 
     if not picks:
         send(
-          "No fresh 100x candidates today."
+         "No high-conviction pump candidates today."
         )
         return
 
 
-    msg="🚀 100X HUNTER SCANNER\n\n"
+    msg="🚀 PUMP 100X HUNTER\n\n"
 
 
     for i,p in enumerate(
@@ -259,16 +296,15 @@ def run_scanner():
 
 
     msg+=(
-     "Setup:\n"
-     "Age <24h\n"
-     "Asymmetric alpha candidates\n\n"
-     "Risk:\n"
-     "SL -20%\n"
-     "Move stop above entry at +30%"
+      "Focus:\n"
+      "Fresh <24h Pump Candidates\n"
+      "Microcap Asymmetry Zone\n\n"
+      "Rules:\n"
+      "SL -20%\n"
+      "Profit lock +30%"
     )
 
     send(msg)
-
 
 
 if __name__=="__main__":
