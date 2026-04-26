@@ -8,17 +8,25 @@ def send(msg):
     requests.post(
       f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
       json={
-        "chat_id":CHAT_ID,
-        "text":msg
+       "chat_id":CHAT_ID,
+       "text":msg
       },
       timeout=20
     )
 
 
-BAD={"AI","SOL","ETH","BTC","DOGE","CAT","TOKEN"}
+BAD={
+"AI","SOL","ETH","BTC",
+"DOGE","CAT","TOKEN"
+}
 
+
+#############################
+# FETCH
+#############################
 
 def fetch():
+
     queries=[
       "pump",
       "pump fun",
@@ -30,12 +38,12 @@ def fetch():
     for q in queries:
       try:
         r=requests.get(
-          f"https://api.dexscreener.com/latest/dex/search?q={q}",
-          timeout=20
+         f"https://api.dexscreener.com/latest/dex/search?q={q}",
+         timeout=20
         )
 
-        pairs += r.json().get(
-          "pairs",[]
+        pairs+=r.json().get(
+         "pairs",[]
         )[:60]
 
       except:
@@ -44,14 +52,21 @@ def fetch():
     return pairs
 
 
+#############################
+# HELPERS
+#############################
+
 def fresh(p):
+
     try:
       c=p.get("pairCreatedAt")
 
       if not c:
          return True
 
-      age=(time.time()*1000-c)/3600000
+      age=(
+       time.time()*1000-c
+      )/3600000
 
       return age<24
 
@@ -60,29 +75,34 @@ def fresh(p):
 
 
 def clean(sym):
-   return bool(
-     re.match(
-      r'^[A-Za-z0-9]+$',
-      sym
-     )
-   )
+
+    return bool(
+      re.match(
+       r'^[A-Za-z0-9]+$',
+       sym
+      )
+    )
 
 
 def link(ca):
 
     if str(ca).startswith("0x"):
-        return (
-         "https://dexscreener.com/bsc/"
-         +ca
-        )
+       return (
+       "https://dexscreener.com/bsc/"
+       +ca
+       )
 
     return (
-      "https://dexscreener.com/solana/"
-      +ca
+     "https://dexscreener.com/solana/"
+     +ca
     )
 
 
-def grad_score(p):
+#############################
+# SCORE ENGINE
+#############################
+
+def score(p):
 
     try:
 
@@ -101,7 +121,7 @@ def grad_score(p):
       )
 
       tx=(p.get("txns") or {}).get(
-        "h24",{}
+       "h24",{}
       )
 
       buys=float(
@@ -115,7 +135,21 @@ def grad_score(p):
       ratio=buys/sells
 
 
-      # anti rug sanity
+      ch=(p.get("priceChange") or {})
+
+      h1=float(
+       ch.get("h1") or 0
+      )
+
+      h24=float(
+       ch.get("h24") or 0
+      )
+
+
+      ################################
+      # Anti-rug sanity
+      ################################
+
       if liq<5000:
          return 0
 
@@ -124,6 +158,11 @@ def grad_score(p):
 
 
       s=0
+
+
+      ################################
+      # Graduation
+      ################################
 
       if 25000<mc<70000:
          s+=35
@@ -146,35 +185,55 @@ def grad_score(p):
 
 
       ca=str(
-        p.get(
-         "baseToken",{}
-        ).get(
-         "address",""
-        )
+       p.get(
+        "baseToken",{}
+       ).get(
+        "address",""
+       )
       ).lower()
-
 
       if "pump" in ca:
          s+=10
 
 
-      return s
+      ################################
+      # Pullback Entry Layer
+      ################################
+
+      # had impulse
+      if h24>50:
+         s+=10
+
+      # healthy pullback zone
+      if -35 < h1 < -8:
+         s+=20
+
+
+      return round(s,2)
 
     except:
       return 0
 
 
-def conviction(s):
 
-    if s>=80:
+def signal(score):
+
+    if score>=95:
+       return "🎯 Pullback Entry"
+
+    if score>=80:
        return "🔥 Imminent"
 
-    if s>=65:
+    if score>=65:
        return "🚀 Near"
 
     return "Watch"
 
 
+
+#############################
+# MAIN
+#############################
 
 def run():
 
@@ -194,38 +253,38 @@ def run():
          "symbol","?"
         ).upper()
 
-
         if sym in BAD:
-            continue
+           continue
 
         if not clean(sym):
-            continue
+           continue
 
         if sym in seen:
-            continue
+           continue
 
         seen.add(sym)
 
 
-        s=grad_score(p)
+        s=score(p)
 
-        if s>=50:
+        if s>=60:
 
-           ca=p.get(
-            "baseToken",{}
-           ).get(
-            "address",""
-           )
+          ca=p.get(
+           "baseToken",{}
+          ).get(
+           "address",""
+          )
 
-           picks.append({
+          picks.append({
              "sym":sym,
              "score":s,
-             "conv":conviction(s),
+             "signal":signal(s),
              "ca":ca
-           })
+          })
+
 
       except:
-         pass
+        pass
 
 
     picks=sorted(
@@ -236,33 +295,42 @@ def run():
 
 
     if not picks:
-       send(
-        "No near migration candidates today."
-       )
-       return
+
+      send(
+       "No graduation pullback setups today."
+      )
+
+      return
 
 
-    msg="🚀 FINAL GRADUATION SNIPER\n\n"
+    msg="🚀 GRADUATION PULLBACK SNIPER\n\n"
 
 
     for p in picks:
 
       msg+=(
        f"{p['sym']}\n"
-       f"{p['conv']}\n"
-       f"Graduation Score {p['score']}\n"
+       f"{p['signal']}\n"
+       f"Score {p['score']}\n"
        f"{link(p['ca'])}\n\n"
       )
 
 
     msg+=(
-      "Focus:\n"
-      "Near DEX migration candidates\n"
-      "Pump.fun style setups"
+      "Execution:\n"
+      "25% starter\n"
+      "Add on reclaim\n\n"
+
+      "Risk:\n"
+      "-20% SL\n"
+      "+30% move stop above entry\n"
+      "2x take principal,\n"
+      "let runner seek 10x+"
     )
 
 
     send(msg)
+
 
 
 if __name__=="__main__":
