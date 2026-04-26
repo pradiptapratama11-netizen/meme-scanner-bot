@@ -1,21 +1,12 @@
-import os
-import time
-import requests
+import os,time,requests,re
 
 BOT_TOKEN=os.getenv("BOT_TOKEN")
 CHAT_ID=os.getenv("CHAT_ID")
 
 
-################################
-# TELEGRAM
-################################
-
 def send(msg):
-
-    url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
     requests.post(
-      url,
+      f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
       json={
        "chat_id":CHAT_ID,
        "text":msg
@@ -24,9 +15,11 @@ def send(msg):
     )
 
 
-################################
-# FETCH
-################################
+BAD={
+"AI","SOL","ETH","BTC",
+"DOGE","CAT","TOKEN"
+}
+
 
 def fetch_pairs():
 
@@ -34,235 +27,191 @@ def fetch_pairs():
       "pump",
       "pepe",
       "frog",
-      "moon",
-      "inu",
       "solana meme"
     ]
 
     pairs=[]
 
     for q in searches:
+      try:
+        r=requests.get(
+         f"https://api.dexscreener.com/latest/dex/search?q={q}",
+         timeout=20
+        )
 
-        try:
-            url=f"https://api.dexscreener.com/latest/dex/search?q={q}"
+        pairs+=r.json().get(
+         "pairs",[]
+        )[:300]
 
-            r=requests.get(
-              url,
-              timeout=20
-            )
-
-            data=r.json()
-
-            pairs+=data.get(
-               "pairs",
-               []
-            )[:80]
-
-        except:
-            pass
+      except:
+        pass
 
     return pairs
 
 
-################################
-# FRESH <24h
-################################
-
 def fresh(p):
 
     try:
+      c=p.get("pairCreatedAt")
+      if not c:
+         return True
 
-        created=p.get(
-          "pairCreatedAt"
-        )
+      age=(
+       time.time()*1000-c
+      )/3600000
 
-        if not created:
-            return True
-
-        age=(
-         time.time()*1000-created
-        )/3600000
-
-        return age<24
+      return age<24
 
     except:
-        return True
+      return True
 
 
-################################
-# BLACKLIST NOISE
-################################
+# SOLANA ADDRESS FILTER
+def solana_only(ca):
 
-BAD={
-"AI","SOL","ETH","BTC",
-"DOGE","CAT","TOKEN",
-"TEST","USD"
-}
+    ca=str(ca)
 
+    if ca.startswith("0x"):
+        return False
 
-################################
-# PUMP FILTER
-################################
+    # base58-ish solana addresses
+    if len(ca)<32:
+        return False
 
-def looks_like_pump(ca):
-
-    ca=str(ca).lower()
-
-    return (
-      "pump" in ca
-      or len(ca)>30
-    )
+    return True
 
 
-################################
-# ALPHA SCORE
-################################
+# latin only symbols
+def clean_symbol(sym):
+
+    if not re.match(
+      r'^[A-Za-z0-9]+$',
+      sym
+    ):
+       return False
+
+    return True
+
 
 def score(p):
 
     try:
 
-        mc=float(
-         p.get("fdv") or 0
-        )
+      mc=float(
+       p.get("fdv") or 0
+      )
 
-        liq=float(
-         (p.get("liquidity") or {}).get(
-          "usd"
-         ) or 0
-        )
+      liq=float(
+       (p.get("liquidity") or {}
+       ).get("usd") or 0
+      )
 
-        vol=float(
-         (p.get("volume") or {}).get(
-          "h24"
-         ) or 0
-        )
+      vol=float(
+       (p.get("volume") or {}
+       ).get("h24") or 0
+      )
 
-        tx=(p.get("txns") or {}).get(
-          "h24",{}
-        )
+      tx=(p.get("txns") or {}).get(
+       "h24",{}
+      )
 
-        buys=float(
-         tx.get("buys") or 0
-        )
+      buys=float(
+       tx.get("buys") or 0
+      )
 
-        sells=float(
-         tx.get("sells") or 1
-        )
+      sells=float(
+       tx.get("sells") or 1
+      )
 
-        ratio=buys/sells
+      ratio=buys/sells
 
+      s=0
 
-        s=0
+      if 10000<mc<50000:
+          s+=35
+      elif mc<100000:
+          s+=20
 
+      if liq>5000:
+          s+=20
 
-        # microcaps sweet spot
-        if 10000<mc<50000:
-            s+=35
+      if vol>10000:
+          s+=20
 
-        elif mc<100000:
-            s+=20
+      if ratio>2:
+          s+=20
 
+      if buys>100:
+          s+=10
 
-        if liq>5000:
-            s+=20
-
-        if vol>10000:
-            s+=20
-
-        if ratio>2:
-            s+=20
-
-        if buys>100:
-            s+=10
-
-        return round(s,2)
+      return s
 
     except:
-        return 0
+      return 0
 
-
-################################
-# LABEL
-################################
 
 def label(s):
 
     if s>=75:
-        return "🔥 Moonshot"
+      return "🔥 Moonshot"
 
     if s>=55:
-        return "🚀 High Conviction"
+      return "🚀 High Conviction"
 
     return "Watch"
 
 
-################################
-# SCANNER
-################################
-
-def run_scanner():
-
-    pairs=fetch_pairs()
-
-    seen=set()
+def run():
 
     picks=[]
+    seen=set()
 
+    for p in fetch_pairs():
 
-    for p in pairs:
+      try:
 
-        try:
+        if not fresh(p):
+            continue
 
-            if not fresh(p):
-                continue
+        sym=p.get(
+         "baseToken",{}
+        ).get(
+         "symbol","?"
+        ).upper()
 
+        if sym in BAD:
+            continue
 
-            symbol=p.get(
-              "baseToken",{}
-            ).get(
-              "symbol","?"
-            ).upper()
+        if not clean_symbol(sym):
+            continue
 
+        if sym in seen:
+            continue
 
-            if symbol in BAD:
-                continue
+        ca=p.get(
+         "baseToken",{}
+        ).get(
+         "address",""
+        )
 
+        if not solana_only(ca):
+            continue
 
-            if symbol in seen:
-                continue
+        seen.add(sym)
 
-            seen.add(symbol)
+        s=score(p)
 
+        if s>=55:
 
-            ca=p.get(
-             "baseToken",{}
-            ).get(
-             "address","N/A"
-            )
+           picks.append({
+             "sym":sym,
+             "ca":ca,
+             "score":s,
+             "label":label(s)
+           })
 
-
-            if not looks_like_pump(ca):
-                continue
-
-
-            s=score(p)
-
-
-            # tighter threshold
-            if s>=55:
-
-                picks.append({
-
-                 "symbol":symbol,
-                 "ca":ca,
-                 "score":s,
-                 "label":label(s)
-
-                })
-
-        except:
-            pass
+      except:
+         pass
 
 
     picks=sorted(
@@ -273,39 +222,32 @@ def run_scanner():
 
 
     if not picks:
-        send(
-         "No high-conviction pump candidates today."
-        )
-        return
+       send(
+        "No clean Solana moonshots today."
+       )
+       return
 
 
-    msg="🚀 PUMP 100X HUNTER\n\n"
-
+    msg="🚀 SOLANA 100X HUNTER\n\n"
 
     for i,p in enumerate(
       picks,
       1
     ):
-
-        msg+=(
-         f"{i}) {p['symbol']}\n"
-         f"{p['label']}\n"
-         f"Score: {p['score']}\n"
-         f"CA: {p['ca']}\n\n"
-        )
-
+      msg+=(
+       f"{i}) {p['sym']}\n"
+       f"{p['label']}\n"
+       f"Score {p['score']}\n"
+       f"CA {p['ca']}\n\n"
+      )
 
     msg+=(
-      "Focus:\n"
-      "Fresh <24h Pump Candidates\n"
-      "Microcap Asymmetry Zone\n\n"
-      "Rules:\n"
-      "SL -20%\n"
-      "Profit lock +30%"
+      "Solana only | <24h\n"
+      "SL -20% | Profit lock +30%"
     )
 
     send(msg)
 
 
 if __name__=="__main__":
-    run_scanner()
+    run()
