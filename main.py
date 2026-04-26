@@ -21,9 +21,9 @@ BAD={
 }
 
 
-############################
+################################
 # FETCH
-############################
+################################
 
 def fetch_pairs():
 
@@ -44,9 +44,10 @@ def fetch_pairs():
          f"https://api.dexscreener.com/latest/dex/search?q={q}",
          timeout=20
         )
+
         pairs+=r.json().get(
-          "pairs",[]
-        )[:300]
+         "pairs",[]
+        )[:500]
 
       except:
         pass
@@ -54,17 +55,16 @@ def fetch_pairs():
     return pairs
 
 
-############################
-# FILTERS
-############################
+################################
+# HELPERS
+################################
 
 def fresh(p):
-
     try:
       c=p.get("pairCreatedAt")
 
       if not c:
-        return True
+         return True
 
       age=(
        time.time()*1000-c
@@ -87,6 +87,7 @@ def clean_symbol(sym):
 
 
 def chain(ca):
+
     if str(ca).startswith(
       "0x"
     ):
@@ -98,20 +99,20 @@ def chain(ca):
 def link(ca):
 
     if chain(ca)=="bsc":
-       return (
-       "https://dexscreener.com/bsc/"
-       +ca
-       )
+      return (
+      "https://dexscreener.com/bsc/"
+      +ca
+      )
 
     return (
-      "https://dexscreener.com/solana/"
-      +ca
+     "https://dexscreener.com/solana/"
+     +ca
     )
 
 
-############################
-# SCORE
-############################
+################################
+# METRICS
+################################
 
 def metrics(p):
 
@@ -132,7 +133,7 @@ def metrics(p):
       )
 
       tx=(p.get("txns") or {}).get(
-       "h24",{}
+        "h24",{}
       )
 
       buys=float(
@@ -146,22 +147,68 @@ def metrics(p):
       ratio=buys/sells
 
       return (
-       mc,liq,vol,buys,ratio
+       mc,liq,vol,buys,sells,ratio
       )
 
     except:
-      return (0,0,0,0,0)
+      return (0,0,0,0,1,0)
 
 
-def score(p):
+################################
+# RUG RISK FILTER
+################################
 
-    mc,liq,vol,buys,ratio=metrics(p)
+def rug_risk(p):
+
+    mc,liq,vol,buys,sells,ratio=metrics(p)
+
+    risk=0
+
+
+    # thin liquidity danger
+    if mc>0:
+
+      liq_ratio=liq/mc
+
+      if liq_ratio<0.08:
+         risk+=40
+
+      elif liq_ratio<0.12:
+         risk+=20
+
+
+    # fake volume proxy
+    if buys>0:
+
+      if vol > buys*1500:
+          risk+=30
+
+
+    # dead tx flow
+    if buys+sells <40:
+       risk+=20
+
+
+    if ratio<1.2:
+       risk+=20
+
+
+    return risk
+
+
+################################
+# ALPHA SCORE
+################################
+
+def alpha_score(p):
+
+    mc,liq,vol,buys,sells,ratio=metrics(p)
 
     s=0
 
-    # microcap sweet spot
     if 10000<mc<50000:
        s+=35
+
     elif mc<100000:
        s+=20
 
@@ -171,7 +218,6 @@ def score(p):
     if vol>15000:
        s+=20
 
-    # tighter imbalance
     if ratio>3:
        s+=20
 
@@ -181,16 +227,32 @@ def score(p):
     return s
 
 
-############################
+def conviction(s):
+
+    if s>=80:
+       return "A+"
+
+    return "A"
+
+
+def risk_label(r):
+
+    if r<=10:
+      return "LOW"
+
+    if r<=30:
+      return "MED"
+
+    return "HIGH"
+
+
+################################
 # MAIN
-############################
+################################
 
 def run():
 
-    alpha=[]
-    moon=[]
-    grad=[]
-
+    picks=[]
     seen=set()
 
     for p in fetch_pairs():
@@ -217,11 +279,20 @@ def run():
 
         seen.add(sym)
 
-        mc,liq,vol,buys,ratio=metrics(p)
 
-        # simple fake-liq reject
-        if liq>vol*5:
+        r=rug_risk(p)
+
+        # reject garbage
+        if r>30:
             continue
+
+
+        s=alpha_score(p)
+
+        # elite only
+        if s<70:
+            continue
+
 
         ca=p.get(
          "baseToken",{}
@@ -229,103 +300,53 @@ def run():
          "address",""
         )
 
-        s=score(p)
 
-        if s<65:
-            continue
+        picks.append({
 
-
-        item={
          "sym":sym,
          "ca":ca,
-         "score":s
-        }
+         "score":s,
+         "risk":r
 
-
-        # buckets
-        if s>=80:
-            moon.append(item)
-
-        elif (
-          15000<mc<40000
-          and ratio>3
-        ):
-            grad.append(item)
-
-        else:
-            alpha.append(item)
-
+        })
 
       except:
         pass
 
 
-    alpha=sorted(
-      alpha,
+    picks=sorted(
+      picks,
       key=lambda x:x["score"],
       reverse=True
-    )[:3]
-
-    moon=sorted(
-      moon,
-      key=lambda x:x["score"],
-      reverse=True
-    )[:2]
-
-    grad=sorted(
-      grad,
-      key=lambda x:x["score"],
-      reverse=True
-    )[:2]
+    )[:5]
 
 
-    if not alpha and not moon and not grad:
-       send(
-        "No institutional-grade setups today."
-       )
-       return
+    if not picks:
+      send(
+       "No elite low-rug setups today."
+      )
+      return
 
 
-    msg="🚀 ALPHA HUNTER V3\n\n"
+    msg="🚀 ALPHA HUNTER V4\n\n"
 
+    for p in picks:
 
-    if alpha:
-      msg+="ALPHA TRADES\n"
-
-      for p in alpha:
-        msg+=(
-         f"{p['sym']}\n"
-         f"Score {p['score']}\n"
-         f"{link(p['ca'])}\n\n"
-        )
-
-
-    if moon:
-      msg+="MOONSHOT LOTTERY\n"
-
-      for p in moon:
-        msg+=(
-         f"{p['sym']}\n"
-         f"🔥 Moonshot\n"
-         f"{link(p['ca'])}\n\n"
-        )
-
-
-    if grad:
-      msg+="NEAR GRADUATION\n"
-
-      for p in grad:
-        msg+=(
-         f"{p['sym']}\n"
-         f"Sniper Candidate\n"
-         f"{link(p['ca'])}\n\n"
-        )
+      msg+=(
+       f"{p['sym']}\n"
+       f"Conviction {conviction(p['score'])}\n"
+       f"Rug Risk {risk_label(p['risk'])}\n"
+       f"{link(p['ca'])}\n\n"
+      )
 
 
     msg+=(
-      "Rules:\n"
-      "-20% SL\n"
-      "+30% lock profits"
+      "Filters:\n"
+      "Low rug risk only\n"
+      "Fresh <24h\n\n"
+      "Risk:\n"
+      "-20% stop\n"
+      "+30% profit lock"
     )
 
     send(msg)
@@ -333,4 +354,4 @@ def run():
 
 
 if __name__=="__main__":
-   run()
+    run()
