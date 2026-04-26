@@ -5,7 +5,6 @@ CHAT_ID=os.getenv("CHAT_ID")
 
 
 def send(msg):
-
     requests.post(
       f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
       json={
@@ -23,7 +22,7 @@ BAD={
 
 
 ############################
-# SEARCH
+# FETCH
 ############################
 
 def fetch_pairs():
@@ -33,23 +32,20 @@ def fetch_pairs():
       "pepe",
       "frog",
       "inu",
-      "bsc meme",
-      "solana meme"
+      "solana meme",
+      "bsc meme"
     ]
 
     pairs=[]
 
     for q in searches:
-
       try:
-
         r=requests.get(
          f"https://api.dexscreener.com/latest/dex/search?q={q}",
          timeout=20
         )
-
         pairs+=r.json().get(
-         "pairs",[]
+          "pairs",[]
         )[:100]
 
       except:
@@ -59,18 +55,16 @@ def fetch_pairs():
 
 
 ############################
-# AGE
+# FILTERS
 ############################
 
 def fresh(p):
 
     try:
-      c=p.get(
-       "pairCreatedAt"
-      )
+      c=p.get("pairCreatedAt")
 
       if not c:
-         return True
+        return True
 
       age=(
        time.time()*1000-c
@@ -82,10 +76,6 @@ def fresh(p):
       return True
 
 
-############################
-# CLEAN TICKERS
-############################
-
 def clean_symbol(sym):
 
     return bool(
@@ -96,27 +86,34 @@ def clean_symbol(sym):
     )
 
 
-############################
-# CHAIN DETECT
-############################
-
-def detect_chain(ca):
-
-    ca=str(ca)
-
-    if ca.startswith(
+def chain(ca):
+    if str(ca).startswith(
       "0x"
     ):
-       return "BSC"
+      return "bsc"
 
-    return "SOL"
+    return "solana"
+
+
+def link(ca):
+
+    if chain(ca)=="bsc":
+       return (
+       "https://dexscreener.com/bsc/"
+       +ca
+       )
+
+    return (
+      "https://dexscreener.com/solana/"
+      +ca
+    )
 
 
 ############################
 # SCORE
 ############################
 
-def score(p):
+def metrics(p):
 
     try:
 
@@ -148,40 +145,40 @@ def score(p):
 
       ratio=buys/sells
 
-      s=0
-
-      if 10000<mc<60000:
-          s+=35
-      elif mc<120000:
-          s+=20
-
-      if liq>5000:
-          s+=20
-
-      if vol>10000:
-          s+=20
-
-      if ratio>2:
-          s+=20
-
-      if buys>100:
-          s+=10
-
-      return s
+      return (
+       mc,liq,vol,buys,ratio
+      )
 
     except:
-      return 0
+      return (0,0,0,0,0)
 
 
-def label(s):
+def score(p):
 
-    if s>=75:
-      return "🔥 Moonshot"
+    mc,liq,vol,buys,ratio=metrics(p)
 
-    if s>=55:
-      return "🚀 High Conviction"
+    s=0
 
-    return "Watch"
+    # microcap sweet spot
+    if 10000<mc<50000:
+       s+=35
+    elif mc<100000:
+       s+=20
+
+    if liq>7000:
+       s+=20
+
+    if vol>15000:
+       s+=20
+
+    # tighter imbalance
+    if ratio>3:
+       s+=20
+
+    if buys>120:
+       s+=10
+
+    return s
 
 
 ############################
@@ -190,8 +187,9 @@ def label(s):
 
 def run():
 
-    sol=[]
-    bsc=[]
+    alpha=[]
+    moon=[]
+    grad=[]
 
     seen=set()
 
@@ -209,15 +207,21 @@ def run():
         ).upper()
 
         if sym in BAD:
-           continue
+            continue
 
         if not clean_symbol(sym):
-           continue
+            continue
 
         if sym in seen:
-           continue
+            continue
 
         seen.add(sym)
+
+        mc,liq,vol,buys,ratio=metrics(p)
+
+        # simple fake-liq reject
+        if liq>vol*5:
+            continue
 
         ca=p.get(
          "baseToken",{}
@@ -227,80 +231,105 @@ def run():
 
         s=score(p)
 
-        if s<55:
-           continue
+        if s<65:
+            continue
+
 
         item={
          "sym":sym,
          "ca":ca,
-         "score":s,
-         "label":label(s)
+         "score":s
         }
 
-        if detect_chain(ca)=="SOL":
-           sol.append(item)
+
+        # buckets
+        if s>=80:
+            moon.append(item)
+
+        elif (
+          15000<mc<40000
+          and ratio>3
+        ):
+            grad.append(item)
+
         else:
-           bsc.append(item)
+            alpha.append(item)
+
 
       except:
         pass
 
 
-    sol=sorted(
-      sol,
+    alpha=sorted(
+      alpha,
       key=lambda x:x["score"],
       reverse=True
     )[:3]
 
-    bsc=sorted(
-      bsc,
+    moon=sorted(
+      moon,
       key=lambda x:x["score"],
       reverse=True
-    )[:3]
+    )[:2]
+
+    grad=sorted(
+      grad,
+      key=lambda x:x["score"],
+      reverse=True
+    )[:2]
 
 
-    if not sol and not bsc:
-      send(
-       "No moonshot candidates today."
-      )
-      return
+    if not alpha and not moon and not grad:
+       send(
+        "No institutional-grade setups today."
+       )
+       return
 
 
-    msg="🚀 DUAL CHAIN 100X HUNTER\n\n"
+    msg="🚀 ALPHA HUNTER V3\n\n"
 
 
-    if sol:
+    if alpha:
+      msg+="ALPHA TRADES\n"
 
-      msg+="SOLANA PICKS\n"
-
-      for p in sol:
-         msg+=(
-          f"{p['sym']} "
-          f"{p['label']}\n"
-          f"CA {p['ca']}\n\n"
-         )
+      for p in alpha:
+        msg+=(
+         f"{p['sym']}\n"
+         f"Score {p['score']}\n"
+         f"{link(p['ca'])}\n\n"
+        )
 
 
-    if bsc:
+    if moon:
+      msg+="MOONSHOT LOTTERY\n"
 
-      msg+="BSC PICKS\n"
+      for p in moon:
+        msg+=(
+         f"{p['sym']}\n"
+         f"🔥 Moonshot\n"
+         f"{link(p['ca'])}\n\n"
+        )
 
-      for p in bsc:
-         msg+=(
-          f"{p['sym']} "
-          f"{p['label']}\n"
-          f"CA {p['ca']}\n\n"
-         )
+
+    if grad:
+      msg+="NEAR GRADUATION\n"
+
+      for p in grad:
+        msg+=(
+         f"{p['sym']}\n"
+         f"Sniper Candidate\n"
+         f"{link(p['ca'])}\n\n"
+        )
 
 
     msg+=(
-      "Fresh <24h\n"
-      "3x-100x asymmetry zone\n\n"
-      "SL -20%\n"
-      "Profit lock +30%"
+      "Rules:\n"
+      "-20% SL\n"
+      "+30% lock profits"
     )
 
     send(msg)
+
 
 
 if __name__=="__main__":
