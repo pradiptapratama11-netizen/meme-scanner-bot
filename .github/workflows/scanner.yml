@@ -20,5 +20,5 @@ jobs:
 
       - run: python main.py
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          BOT_TOKEN: ${{ secrets.MEME_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.MEME_CHAT_ID }}
