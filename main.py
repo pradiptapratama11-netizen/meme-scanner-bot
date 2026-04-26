@@ -5,6 +5,7 @@ CHAT_ID=os.getenv("CHAT_ID")
 
 
 def send(msg):
+
     requests.post(
       f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
       json={
@@ -21,9 +22,9 @@ BAD={
 }
 
 
-########################
+############################
 # FETCH
-########################
+############################
 
 def fetch_pairs():
 
@@ -32,8 +33,8 @@ def fetch_pairs():
       "pepe",
       "frog",
       "inu",
-      "bsc meme",
-      "solana meme"
+      "solana meme",
+      "bsc meme"
     ]
 
     pairs=[]
@@ -47,7 +48,7 @@ def fetch_pairs():
 
         pairs+=r.json().get(
          "pairs",[]
-        )[:100]
+        )[:120]
 
       except:
         pass
@@ -55,9 +56,9 @@ def fetch_pairs():
     return pairs
 
 
-########################
+############################
 # HELPERS
-########################
+############################
 
 def fresh(p):
 
@@ -80,39 +81,40 @@ def fresh(p):
 
 
 def clean(sym):
-    return bool(
-      re.match(
-       r'^[A-Za-z0-9]+$',
-       sym
-      )
+   return bool(
+    re.match(
+      r'^[A-Za-z0-9]+$',
+      sym
     )
+   )
 
 
 def chain(ca):
-    if str(ca).startswith(
-      "0x"
-    ):
-       return "bsc"
-    return "solana"
+   if str(ca).startswith(
+     "0x"
+   ):
+      return "bsc"
+
+   return "solana"
 
 
 def link(ca):
 
-    if chain(ca)=="bsc":
+   if chain(ca)=="bsc":
       return (
        "https://dexscreener.com/bsc/"
        +ca
       )
 
-    return (
-      "https://dexscreener.com/solana/"
-      +ca
-    )
+   return (
+    "https://dexscreener.com/solana/"
+    +ca
+   )
 
 
-########################
+############################
 # METRICS
-########################
+############################
 
 def metrics(p):
 
@@ -133,7 +135,7 @@ def metrics(p):
       )
 
       tx=(p.get("txns") or {}).get(
-       "h24",{}
+        "h24",{}
       )
 
       buys=float(
@@ -146,7 +148,7 @@ def metrics(p):
 
       ratio=buys/sells
 
-      return(
+      return (
        mc,liq,vol,
        buys,sells,ratio
       )
@@ -158,44 +160,9 @@ def metrics(p):
       )
 
 
-########################
-# RISK SCORE
-########################
-
-def risk(p):
-
-    mc,liq,vol,buys,sells,ratio=metrics(p)
-
-    r=0
-
-    if mc>0:
-
-      lr=liq/mc
-
-      if lr<0.06:
-          r+=30
-
-      elif lr<0.10:
-          r+=15
-
-
-    if buys+sells<20:
-        r+=15
-
-
-    if ratio<1.3:
-        r+=15
-
-
-    if buys>0 and vol>buys*2000:
-        r+=20
-
-    return r
-
-
-########################
-# ALPHA SCORE
-########################
+############################
+# SCORE
+############################
 
 def alpha(p):
 
@@ -203,35 +170,34 @@ def alpha(p):
 
     s=0
 
-    if 10000<mc<60000:
-       s+=30
+    if 15000<mc<70000:
+        s+=30
+
     elif mc<120000:
-       s+=15
+        s+=15
 
-    if liq>5000:
-       s+=20
+    if liq>10000:
+        s+=25
 
-    if vol>10000:
-       s+=20
+    if vol>15000:
+        s+=20
 
     if ratio>2:
-       s+=20
+        s+=15
 
-    if buys>70:
-       s+=10
+    if buys>80:
+        s+=10
 
     return s
 
 
-########################
+############################
 # MAIN
-########################
+############################
 
 def run():
 
-    elite=[]
-    spec=[]
-
+    picks=[]
     seen=set()
 
     for p in fetch_pairs():
@@ -241,11 +207,13 @@ def run():
         if not fresh(p):
            continue
 
+
         sym=p.get(
          "baseToken",{}
         ).get(
          "symbol","?"
         ).upper()
+
 
         if sym in BAD:
            continue
@@ -258,10 +226,33 @@ def run():
 
         seen.add(sym)
 
-        r=risk(p)
 
-        if r>50:
-           continue
+        mc,liq,vol,buys,sells,ratio=metrics(p)
+
+
+        ################################
+        # ANTI LIQUIDITY TRAPS
+        ################################
+
+        # hard floor
+        if liq<5000:
+            continue
+
+        # liquidity vs fdv sanity
+        if mc>0 and liq/mc<0.15:
+            continue
+
+        # fake volume proxy
+        if buys>0 and vol>buys*1500:
+            continue
+
+        # weak flow reject
+        if buys+sells<40:
+            continue
+
+        # weak imbalance reject
+        if ratio<1.5:
+            continue
 
 
         s=alpha(p)
@@ -270,81 +261,60 @@ def run():
            continue
 
 
-        item={
+        ca=p.get(
+         "baseToken",{}
+        ).get(
+         "address",""
+        )
+
+
+        picks.append({
           "sym":sym,
-          "ca":p.get(
-             "baseToken",{}
-           ).get(
-             "address",""
-           ),
-          "score":s,
-          "risk":r
-        }
+          "ca":ca,
+          "score":s
+        })
 
-        if r<=25:
-            elite.append(item)
-
-        else:
-            spec.append(item)
 
       except:
         pass
 
 
-    elite=sorted(
-      elite,
+    picks=sorted(
+      picks,
       key=lambda x:x["score"],
       reverse=True
-    )[:3]
-
-    spec=sorted(
-      spec,
-      key=lambda x:x["score"],
-      reverse=True
-    )[:3]
+    )[:5]
 
 
-    if not elite and not spec:
-      send(
-       "No balanced setups today."
+    if not picks:
+
+       send(
+        "No tradeable low-trap setups today."
+       )
+
+       return
+
+
+    msg="🚀 ANTI-LIQUIDITY HUNTER V5\n\n"
+
+    for p in picks:
+
+      msg+=(
+       f"{p['sym']}\n"
+       f"Conviction A\n"
+       f"{link(p['ca'])}\n\n"
       )
-      return
-
-
-    msg="🚀 BALANCED HUNTER V4.5\n\n"
-
-
-    if elite:
-      msg+="ELITE PICKS\n"
-
-      for p in elite:
-
-        msg+=(
-         f"{p['sym']}\n"
-         f"Risk LOW\n"
-         f"{link(p['ca'])}\n\n"
-        )
-
-
-    if spec:
-      msg+="SPECULATIVE\n"
-
-      for p in spec:
-
-        msg+=(
-         f"{p['sym']}\n"
-         f"Risk MED\n"
-         f"{link(p['ca'])}\n\n"
-        )
 
 
     msg+=(
-     "Focus:\n"
-     "Fresh <24h\n"
-     "3x-100x asymmetry\n\n"
-     "SL -20%\n"
-     "Profit lock +30%"
+      "Filters:\n"
+      "Liquidity trap removed\n"
+      "Fresh <24h only\n\n"
+      "Risk:\n"
+      "-20% stop\n"
+      "+30% profit lock"
     )
+
 
     send(msg)
 
