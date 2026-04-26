@@ -1,4 +1,4 @@
-import os,time,requests,re
+import os,requests
 
 BOT_TOKEN=os.getenv("BOT_TOKEN")
 CHAT_ID=os.getenv("CHAT_ID")
@@ -16,107 +16,27 @@ def send(msg):
     )
 
 
-BAD={
-"AI","SOL","ETH","BTC",
-"DOGE","CAT","TOKEN"
-}
+##################################
+# SEARCH FRESH PUMP COINS
+##################################
 
+def fetch():
 
-############################
-# FETCH
-############################
-
-def fetch_pairs():
-
-    searches=[
-      "pump",
-      "pepe",
-      "frog",
-      "inu",
-      "solana meme",
-      "bsc meme"
-    ]
-
-    pairs=[]
-
-    for q in searches:
-      try:
-        r=requests.get(
-         f"https://api.dexscreener.com/latest/dex/search?q={q}",
-         timeout=20
-        )
-
-        pairs+=r.json().get(
-         "pairs",[]
-        )[:120]
-
-      except:
-        pass
-
-    return pairs
-
-
-############################
-# HELPERS
-############################
-
-def fresh(p):
-
-    try:
-      c=p.get(
-       "pairCreatedAt"
-      )
-
-      if not c:
-         return True
-
-      age=(
-       time.time()*1000-c
-      )/3600000
-
-      return age<24
-
-    except:
-      return True
-
-
-def clean(sym):
-   return bool(
-    re.match(
-      r'^[A-Za-z0-9]+$',
-      sym
+    r=requests.get(
+      "https://api.dexscreener.com/latest/dex/search?q=pump",
+      timeout=20
     )
-   )
+
+    return r.json().get(
+      "pairs",[]
+    )[:150]
 
 
-def chain(ca):
-   if str(ca).startswith(
-     "0x"
-   ):
-      return "bsc"
+##################################
+# NEAR GRADUATION SCORE
+##################################
 
-   return "solana"
-
-
-def link(ca):
-
-   if chain(ca)=="bsc":
-      return (
-       "https://dexscreener.com/bsc/"
-       +ca
-      )
-
-   return (
-    "https://dexscreener.com/solana/"
-    +ca
-   )
-
-
-############################
-# METRICS
-############################
-
-def metrics(p):
+def score(p):
 
     try:
 
@@ -148,65 +68,39 @@ def metrics(p):
 
       ratio=buys/sells
 
-      return (
-       mc,liq,vol,
-       buys,sells,ratio
-      )
+      s=0
+
+      # proxy near graduation zone
+      if 20000<mc<80000:
+          s+=35
+
+      if liq>8000:
+          s+=20
+
+      if vol>12000:
+          s+=20
+
+      if ratio>2:
+          s+=15
+
+      if buys>100:
+          s+=10
+
+      return s
 
     except:
-      return(
-       0,0,0,
-       0,1,0
-      )
+      return 0
 
-
-############################
-# SCORE
-############################
-
-def alpha(p):
-
-    mc,liq,vol,buys,sells,ratio=metrics(p)
-
-    s=0
-
-    if 15000<mc<70000:
-        s+=30
-
-    elif mc<120000:
-        s+=15
-
-    if liq>10000:
-        s+=25
-
-    if vol>15000:
-        s+=20
-
-    if ratio>2:
-        s+=15
-
-    if buys>80:
-        s+=10
-
-    return s
-
-
-############################
-# MAIN
-############################
 
 def run():
 
     picks=[]
+
     seen=set()
 
-    for p in fetch_pairs():
+    for p in fetch():
 
       try:
-
-        if not fresh(p):
-           continue
-
 
         sym=p.get(
          "baseToken",{}
@@ -214,52 +108,10 @@ def run():
          "symbol","?"
         ).upper()
 
-
-        if sym in BAD:
-           continue
-
-        if not clean(sym):
-           continue
-
         if sym in seen:
-           continue
+            continue
 
         seen.add(sym)
-
-
-        mc,liq,vol,buys,sells,ratio=metrics(p)
-
-
-        ################################
-        # ANTI LIQUIDITY TRAPS
-        ################################
-
-        # hard floor
-        if liq<5000:
-            continue
-
-        # liquidity vs fdv sanity
-        if mc>0 and liq/mc<0.15:
-            continue
-
-        # fake volume proxy
-        if buys>0 and vol>buys*1500:
-            continue
-
-        # weak flow reject
-        if buys+sells<40:
-            continue
-
-        # weak imbalance reject
-        if ratio<1.5:
-            continue
-
-
-        s=alpha(p)
-
-        if s<60:
-           continue
-
 
         ca=p.get(
          "baseToken",{}
@@ -267,16 +119,22 @@ def run():
          "address",""
         )
 
+        # focus pump-like only
+        if "pump" not in ca.lower():
+            continue
 
-        picks.append({
-          "sym":sym,
-          "ca":ca,
-          "score":s
-        })
+        s=score(p)
 
+        if s>=60:
+
+          picks.append({
+            "sym":sym,
+            "ca":ca,
+            "score":s
+          })
 
       except:
-        pass
+         pass
 
 
     picks=sorted(
@@ -288,31 +146,28 @@ def run():
 
     if not picks:
 
-       send(
-        "No tradeable low-trap setups today."
-       )
+      send(
+       "No near-migration candidates."
+      )
 
-       return
+      return
 
 
-    msg="🚀 ANTI-LIQUIDITY HUNTER V5\n\n"
+    msg="🚀 PUMP MIGRATION SNIPER\n\n"
 
     for p in picks:
 
       msg+=(
        f"{p['sym']}\n"
-       f"Conviction A\n"
-       f"{link(p['ca'])}\n\n"
+       f"Near Graduation Score {p['score']}\n"
+       f"https://dexscreener.com/solana/{p['ca']}\n\n"
       )
 
 
     msg+=(
-      "Filters:\n"
-      "Liquidity trap removed\n"
-      "Fresh <24h only\n\n"
-      "Risk:\n"
-      "-20% stop\n"
-      "+30% profit lock"
+      "Focus:\n"
+      "Pre migration candidates\n"
+      "Potential Pump→DEX moves"
     )
 
 
