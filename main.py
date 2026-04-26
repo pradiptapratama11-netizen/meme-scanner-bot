@@ -5,6 +5,7 @@ CHAT_ID=os.getenv("CHAT_ID")
 
 
 def send(msg):
+
     requests.post(
       f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
       json={
@@ -21,19 +22,27 @@ BAD={
 }
 
 
+############################
+# SEARCH
+############################
+
 def fetch_pairs():
 
     searches=[
       "pump",
       "pepe",
       "frog",
+      "inu",
+      "bsc meme",
       "solana meme"
     ]
 
     pairs=[]
 
     for q in searches:
+
       try:
+
         r=requests.get(
          f"https://api.dexscreener.com/latest/dex/search?q={q}",
          timeout=20
@@ -41,7 +50,7 @@ def fetch_pairs():
 
         pairs+=r.json().get(
          "pairs",[]
-        )[:300]
+        )[:100]
 
       except:
         pass
@@ -49,10 +58,17 @@ def fetch_pairs():
     return pairs
 
 
+############################
+# AGE
+############################
+
 def fresh(p):
 
     try:
-      c=p.get("pairCreatedAt")
+      c=p.get(
+       "pairCreatedAt"
+      )
+
       if not c:
          return True
 
@@ -66,32 +82,39 @@ def fresh(p):
       return True
 
 
-# SOLANA ADDRESS FILTER
-def solana_only(ca):
+############################
+# CLEAN TICKERS
+############################
+
+def clean_symbol(sym):
+
+    return bool(
+      re.match(
+       r'^[A-Za-z0-9]+$',
+       sym
+      )
+    )
+
+
+############################
+# CHAIN DETECT
+############################
+
+def detect_chain(ca):
 
     ca=str(ca)
 
-    if ca.startswith("0x"):
-        return False
-
-    # base58-ish solana addresses
-    if len(ca)<32:
-        return False
-
-    return True
-
-
-# latin only symbols
-def clean_symbol(sym):
-
-    if not re.match(
-      r'^[A-Za-z0-9]+$',
-      sym
+    if ca.startswith(
+      "0x"
     ):
-       return False
+       return "BSC"
 
-    return True
+    return "SOL"
 
+
+############################
+# SCORE
+############################
 
 def score(p):
 
@@ -127,9 +150,9 @@ def score(p):
 
       s=0
 
-      if 10000<mc<50000:
+      if 10000<mc<60000:
           s+=35
-      elif mc<100000:
+      elif mc<120000:
           s+=20
 
       if liq>5000:
@@ -161,9 +184,15 @@ def label(s):
     return "Watch"
 
 
+############################
+# MAIN
+############################
+
 def run():
 
-    picks=[]
+    sol=[]
+    bsc=[]
+
     seen=set()
 
     for p in fetch_pairs():
@@ -180,13 +209,15 @@ def run():
         ).upper()
 
         if sym in BAD:
-            continue
+           continue
 
         if not clean_symbol(sym):
-            continue
+           continue
 
         if sym in seen:
-            continue
+           continue
+
+        seen.add(sym)
 
         ca=p.get(
          "baseToken",{}
@@ -194,60 +225,83 @@ def run():
          "address",""
         )
 
-        if not solana_only(ca):
-            continue
-
-        seen.add(sym)
-
         s=score(p)
 
-        if s>=55:
+        if s<55:
+           continue
 
-           picks.append({
-             "sym":sym,
-             "ca":ca,
-             "score":s,
-             "label":label(s)
-           })
+        item={
+         "sym":sym,
+         "ca":ca,
+         "score":s,
+         "label":label(s)
+        }
+
+        if detect_chain(ca)=="SOL":
+           sol.append(item)
+        else:
+           bsc.append(item)
 
       except:
-         pass
+        pass
 
 
-    picks=sorted(
-      picks,
+    sol=sorted(
+      sol,
       key=lambda x:x["score"],
       reverse=True
-    )[:5]
+    )[:3]
+
+    bsc=sorted(
+      bsc,
+      key=lambda x:x["score"],
+      reverse=True
+    )[:3]
 
 
-    if not picks:
-       send(
-        "No clean Solana moonshots today."
-       )
-       return
-
-
-    msg="🚀 SOLANA 100X HUNTER\n\n"
-
-    for i,p in enumerate(
-      picks,
-      1
-    ):
-      msg+=(
-       f"{i}) {p['sym']}\n"
-       f"{p['label']}\n"
-       f"Score {p['score']}\n"
-       f"CA {p['ca']}\n\n"
+    if not sol and not bsc:
+      send(
+       "No moonshot candidates today."
       )
+      return
+
+
+    msg="🚀 DUAL CHAIN 100X HUNTER\n\n"
+
+
+    if sol:
+
+      msg+="SOLANA PICKS\n"
+
+      for p in sol:
+         msg+=(
+          f"{p['sym']} "
+          f"{p['label']}\n"
+          f"CA {p['ca']}\n\n"
+         )
+
+
+    if bsc:
+
+      msg+="BSC PICKS\n"
+
+      for p in bsc:
+         msg+=(
+          f"{p['sym']} "
+          f"{p['label']}\n"
+          f"CA {p['ca']}\n\n"
+         )
+
 
     msg+=(
-      "Solana only | <24h\n"
-      "SL -20% | Profit lock +30%"
+      "Fresh <24h\n"
+      "3x-100x asymmetry zone\n\n"
+      "SL -20%\n"
+      "Profit lock +30%"
     )
 
     send(msg)
 
 
 if __name__=="__main__":
-    run()
+   run()
